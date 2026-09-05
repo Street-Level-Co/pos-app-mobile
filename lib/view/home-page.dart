@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:pos_mobile/exception/api-exception.dart';
 import 'package:pos_mobile/model/buying-product.dart';
+import 'package:pos_mobile/model/item-catalog.dart';
+import 'package:pos_mobile/service/item-catalog-service.dart';
 import 'package:pos_mobile/service/theme-changer.dart';
+import 'package:pos_mobile/service/token-storage.dart';
 import 'package:pos_mobile/view/app-drawer.dart';
 import 'package:pos_mobile/view/cart-page.dart';
+import 'package:pos_mobile/view/new-product.dart';
 import 'dart:developer';
 
 import '../model/product.dart';
@@ -15,99 +20,66 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  String selectedCategory = 'All';
   int cartItemCount = 0;
   double cartTotal = 0;
   late List<BuyingProduct> cartList = [];
 
-  final List<String> categories = ['All', 'Coffee', 'Pastries', 'Sandwiches'];
+  bool _loading = true;
+  String? _error;
+  List<Product> menuItems = [];
 
-  final List<Product> menuItems = [
-    Product(
-      name: 'Caramel Macchiato',
-      price: 4.50,
-      image:
-          'https://images.unsplash.com/photo-1511920170033-f8396924c348?w=400',
-      category: 'Coffee',
-      id: '790123GHJKASDFNBKL',
-      stock: 100,
-      sku: '',
-    ),
-    Product(
-      name: 'Butter Croissant',
-      price: 3.00,
-      image: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=400',
-      category: 'Pastries',
-      id: '120893fhjgASDBM,',
-      stock: 100,
-      sku: '',
-    ),
-    Product(
-      name: 'Turkey Club Sandwich',
-      price: 8.50,
-      image: 'https://images.unsplash.com/photo-1553909489-cd47e0907980?w=400',
-      category: 'Sandwiches',
-      id: '0789231gfhjasdvd',
-      stock: 100,
-      sku: '',
-    ),
-    Product(
-      name: 'Double Espresso',
-      price: 2.50,
-      image:
-          'https://images.unsplash.com/photo-1510591509098-f4fdc6d0ff04?w=400',
-      category: 'Coffee',
-      id: 'asdhjikl67213r567',
-      stock: 100,
-      sku: '',
-    ),
-    Product(
-      name: 'Blueberry Muffin',
-      price: 3.25,
-      image: '',
-      category: 'Pastries',
-      id: '89123hjvdsa',
-      stock: 100,
-      sku: '',
-    ),
-    Product(
-      name: 'Vanilla Latte',
-      price: 4.00,
-      image: 'https://images.unsplash.com/photo-1561882468-9110e03e0f78?w=400',
-      category: 'Coffee',
-      id: '123789fhgvujdfsad',
-      stock: 100,
-      sku: '',
-    ),
-    Product(
-      name: 'Iced Americano',
-      price: 3.50,
-      image:
-          'https://images.unsplash.com/photo-1517487881594-2787fef5ebf7?w=400',
-      category: 'Coffee',
-      id: 'y89127369gvbd',
-      stock: 100,
-      sku: '',
-    ),
-    Product(
-      name: 'House Drip Coffee',
-      price: 2.00,
-      image:
-          'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=400',
-      category: 'Coffee',
-      id: '78123tyc12v3hj1',
-      stock: 100,
-      sku: '',
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadCatalog();
+  }
 
-  List<Product> get filteredItems {
-    if (selectedCategory == 'All') {
-      return menuItems;
+  Future<void> _loadCatalog() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final orgId = await TokenStorage().getSelectedOrgId();
+      if (orgId == null || orgId.isEmpty) {
+        setState(() {
+          _error = 'No organization selected';
+          _loading = false;
+        });
+        return;
+      }
+      final items = await ItemCatalogService().getAllForOrganization(orgId);
+      setState(() {
+        menuItems = items.map(_toProduct).toList();
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
     }
-    return menuItems
-        .where((item) => item.category == selectedCategory)
-        .toList();
+  }
+
+  Product _toProduct(ItemCatalog catalogItem) {
+    return Product(
+      id: catalogItem.id ?? catalogItem.itemId,
+      name: catalogItem.itemName,
+      stock: 0,
+      sku: '',
+      price: catalogItem.price,
+      image: catalogItem.imgUrl ?? '',
+      category: 'All',
+      description: catalogItem.description,
+    );
+  }
+
+  Future<void> _openNewItem() async {
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (context) => NewProductPage()),
+    );
+    if (saved == true) _loadCatalog();
   }
 
   void _addToCart(Product item) {
@@ -240,67 +212,8 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
-          // Category Filter
-          Container(
-            height: 50,
-            margin: EdgeInsets.only(bottom: 16),
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              itemCount: categories.length,
-              itemBuilder: (context, index) {
-                final category = categories[index];
-                final isSelected = selectedCategory == category;
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      selectedCategory = category;
-                    });
-                  },
-                  child: Container(
-                    margin: EdgeInsets.only(right: 12),
-                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isSelected ? Color(0xFF3B82F6) : Color(0xFF161B22),
-                      borderRadius: BorderRadius.circular(25),
-                    ),
-                    child: Center(
-                      child: Text(
-                        category,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: isSelected
-                              ? FontWeight.w600
-                              : FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-
-          // Product Grid
-          Expanded(
-            child: GridView.builder(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                childAspectRatio: 0.75,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-              ),
-              itemCount: filteredItems.length,
-              itemBuilder: (context, index) {
-                return ProductCard(
-                  item: filteredItems[index],
-                  onAddToCart: () => _addToCart(filteredItems[index]),
-                );
-              },
-            ),
-          ),
+          // Catalog
+          Expanded(child: _buildCatalogArea()),
 
           // Cart Footer
           Visibility(
@@ -389,6 +302,81 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCatalogArea() {
+    if (_loading) {
+      return Center(child: CircularProgressIndicator(color: Color(0xFF3B82F6)));
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 40),
+              SizedBox(height: 12),
+              Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white)),
+              SizedBox(height: 16),
+              ElevatedButton(onPressed: _loadCatalog, child: Text('Retry')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (menuItems.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.inventory_2_outlined, color: Colors.grey[600], size: 48),
+              SizedBox(height: 16),
+              Text(
+                'No items in your catalog yet.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+              SizedBox(height: 20),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Color(0xFF3B82F6),
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: Icon(Icons.add, color: Colors.white),
+                label: Text('Add Items to Catalog', style: TextStyle(color: Colors.white)),
+                onPressed: _openNewItem,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadCatalog,
+      child: GridView.builder(
+        padding: EdgeInsets.symmetric(horizontal: 16),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          childAspectRatio: 0.75,
+          crossAxisSpacing: 16,
+          mainAxisSpacing: 16,
+        ),
+        itemCount: menuItems.length,
+        itemBuilder: (context, index) {
+          return ProductCard(
+            item: menuItems[index],
+            onAddToCart: () => _addToCart(menuItems[index]),
+          );
+        },
       ),
     );
   }

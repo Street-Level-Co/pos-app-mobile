@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:pos_mobile/exception/api-exception.dart';
 import 'package:pos_mobile/service/auth-service.dart';
+import 'package:pos_mobile/service/token-storage.dart';
 import 'package:pos_mobile/view/home-page.dart';
+import 'package:pos_mobile/view/organization-form-page.dart';
+import 'package:pos_mobile/view/organization-selection-page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -32,6 +35,40 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  Future<void> _notifyNoOrganization() {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: Color(0xFF161B22),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: Icon(Icons.business_outlined, color: Color(0xFF3B82F6), size: 32),
+        title: Text(
+          'No Organization Found',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'You need to create an organization to continue.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.grey[400]),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Color(0xFF3B82F6),
+              padding: EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _handleLogin() async {
     if (_isLoggingIn) return;
 
@@ -44,11 +81,35 @@ class _LoginPageState extends State<LoginPage> {
 
     setState(() => _isLoggingIn = true);
     try {
-      await AuthService().login(username, password);
+      final organizations = await AuthService().login(username, password);
       if (!mounted) return;
+
+      if (organizations.isEmpty) {
+        await _notifyNoOrganization();
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => OrganizationFormPage(isOnboarding: true)),
+        );
+        return;
+      }
+
+      if (organizations.length == 1) {
+        final org = organizations.first;
+        await TokenStorage().saveSelectedOrganization(orgId: org.id, orgName: org.name);
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => HomePage()),
+        );
+        return;
+      }
+
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => HomePage()),
+        MaterialPageRoute(
+          builder: (context) => OrganizationSelectionPage(organizations: organizations),
+        ),
       );
     } on ApiException catch (e) {
       _showError(e.message);

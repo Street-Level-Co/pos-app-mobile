@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pos_mobile/service/auth-service.dart';
+import 'package:pos_mobile/view/business-profile-page.dart';
 import 'package:pos_mobile/view/orders-page.dart';
 import 'package:pos_mobile/view/products-page.dart';
 import 'package:pos_mobile/view/setting-page.dart';
@@ -38,13 +39,18 @@ class AppDrawer extends StatelessWidget {
                   ),
                 ),
                 SizedBox(height: 4),
-                Text(
-                  'Jane Doe',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
+                FutureBuilder<String?>(
+                  future: AuthService().currentUsername(),
+                  builder: (context, snapshot) {
+                    return Text(
+                      snapshot.data ?? 'Jane Doe',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    );
+                  },
                 ),
                 SizedBox(height: 4),
                 Text(
@@ -175,6 +181,19 @@ class AppDrawer extends StatelessWidget {
             ),
             child: Column(
               children: [
+                DrawerMenuItem(
+                  icon: Icons.business_rounded,
+                  iconColor: Color(0xFF3B82F6),
+                  title: 'Business Profile',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => BusinessProfilePage()),
+                    );
+                  },
+                ),
+                SizedBox(height: 4),
                 DrawerMenuItem(
                   icon: Icons.logout_rounded,
                   iconColor: Color(0xFFEF4444),

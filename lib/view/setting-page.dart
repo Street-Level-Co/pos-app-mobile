@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'package:pos_mobile/service/auth-service.dart';
+import 'package:pos_mobile/service/token-storage.dart';
+import 'package:pos_mobile/view/organization-selection-page.dart';
+import 'package:pos_mobile/view/sign-in-page.dart';
+
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -9,6 +14,31 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool isDarkMode = true;
+  String? _selectedOrgName;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSelectedOrganization();
+  }
+
+  Future<void> _loadSelectedOrganization() async {
+    final orgName = await TokenStorage().getSelectedOrgName();
+    if (!mounted) return;
+    setState(() => _selectedOrgName = orgName);
+  }
+
+  Future<void> _changeOrganization() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => OrganizationSelectionPage(isSwitching: true),
+      ),
+    );
+    if (changed == true) {
+      _loadSelectedOrganization();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -87,6 +117,24 @@ class _SettingsPageState extends State<SettingsPage> {
             SizedBox(height: 12),
             SettingsCard(
               children: [
+                SettingsItem(
+                  icon: Icons.business_rounded,
+                  iconColor: Color(0xFF3B82F6),
+                  title: 'Organization',
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _selectedOrgName ?? 'None selected',
+                        style: TextStyle(color: Colors.grey[400]),
+                      ),
+                      SizedBox(width: 8),
+                      Icon(Icons.chevron_right, color: Colors.grey[400]),
+                    ],
+                  ),
+                  onTap: _changeOrganization,
+                ),
+                Divider(color: Color(0xFF21262D), height: 1),
                 SettingsItem(
                   icon: Icons.language,
                   iconColor: Color(0xFF3B82F6),
@@ -238,7 +286,15 @@ class _SettingsPageState extends State<SettingsPage> {
             // Log Out Button
             Center(
               child: TextButton.icon(
-                onPressed: () {},
+                onPressed: () async {
+                  await AuthService().logout();
+                  if (!context.mounted) return;
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (context) => LoginPage()),
+                    (route) => false,
+                  );
+                },
                 icon: Icon(Icons.logout, color: Color(0xFFEF4444)),
                 label: Text(
                   'Log Out',

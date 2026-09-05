@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:pos_mobile/exception/api-exception.dart';
+import 'package:pos_mobile/model/sale.dart';
+import 'package:pos_mobile/service/sales-service.dart';
+import 'package:pos_mobile/service/token-storage.dart';
+import 'package:pos_mobile/view/cart-page.dart';
 import 'package:pos_mobile/view/home-page.dart';
 
 class CheckoutPage extends StatefulWidget {
   final double totalAmount;
+  final List<CartItem> items;
 
-  const CheckoutPage({super.key, required this.totalAmount});
+  const CheckoutPage({super.key, required this.totalAmount, required this.items});
 
   @override
   State<CheckoutPage> createState() => _CheckoutPageState();
@@ -13,7 +19,15 @@ class CheckoutPage extends StatefulWidget {
 class _CheckoutPageState extends State<CheckoutPage> {
   String selectedPaymentMethod = 'Cash';
   String cashTendered = '';
-  
+  final _customerMobileController = TextEditingController();
+  bool _isProcessing = false;
+
+  @override
+  void dispose() {
+    _customerMobileController.dispose();
+    super.dispose();
+  }
+
   double get cashAmount {
     return double.tryParse(cashTendered) ?? 0.0;
   }
@@ -54,7 +68,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     });
   }
 
-  void _processPayment() {
+  Future<void> _processPayment() async {
     if (selectedPaymentMethod == 'Cash' && cashAmount < widget.totalAmount) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -64,6 +78,60 @@ class _CheckoutPageState extends State<CheckoutPage> {
       );
       return;
     }
+
+    final mobileText = _customerMobileController.text.trim();
+    int? customerMobile;
+    if (mobileText.isNotEmpty) {
+      customerMobile = int.tryParse(mobileText);
+      if (customerMobile == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Enter a valid mobile number'),
+            backgroundColor: Color(0xFFEF4444),
+          ),
+        );
+        return;
+      }
+    }
+
+    final orgId = await TokenStorage().getSelectedOrgId();
+    if (orgId == null || orgId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No organization selected'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isProcessing = true);
+    try {
+      await SalesService().register(
+        CreateSale(
+          orgId: orgId,
+          customerMobile: customerMobile,
+          items: widget.items
+              .map((item) => CreateSaleItem(
+                    catalogItemId: item.catalogItemId,
+                    qty: item.quantity,
+                    price: item.price,
+                  ))
+              .toList(),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _isProcessing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Color(0xFFEF4444)),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _isProcessing = false);
 
     showDialog(
       context: context,
@@ -171,7 +239,32 @@ class _CheckoutPageState extends State<CheckoutPage> {
             ),
           ),
 
-          SizedBox(height: 32),
+          SizedBox(height: 24),
+
+          // Customer Mobile Number (Optional)
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Color(0xFF161B22),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: TextField(
+                controller: _customerMobileController,
+                style: TextStyle(color: Colors.white),
+                keyboardType: TextInputType.phone,
+                decoration: InputDecoration(
+                  hintText: 'Customer mobile number (optional)',
+                  hintStyle: TextStyle(color: Colors.grey[600]),
+                  prefixIcon: Icon(Icons.phone, color: Colors.grey[500]),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+              ),
+            ),
+          ),
+
+          SizedBox(height: 24),
 
           // Payment Methods
           SingleChildScrollView(
@@ -468,24 +561,33 @@ class _CheckoutPageState extends State<CheckoutPage> {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: _processPayment,
+                onTap: _isProcessing ? null : _processPayment,
                 borderRadius: BorderRadius.circular(16),
                 child: Center(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Charge \$${widget.totalAmount.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                  child: _isProcessing
+                      ? SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2.5,
+                          ),
+                        )
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              'Charge \$${widget.totalAmount.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(width: 12),
+                            Icon(Icons.arrow_forward, color: Colors.white),
+                          ],
                         ),
-                      ),
-                      SizedBox(width: 12),
-                      Icon(Icons.arrow_forward, color: Colors.white),
-                    ],
-                  ),
                 ),
               ),
             ),

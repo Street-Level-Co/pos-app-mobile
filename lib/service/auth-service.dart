@@ -16,7 +16,9 @@ class AuthService {
   final http.Client _client = http.Client();
   final TokenStorage _tokenStorage = TokenStorage();
 
-  Future<void> login(String username, String password) async {
+  /// Logs in and returns the organizations embedded in the response, so
+  /// callers can drive organization selection without a separate lookup.
+  Future<List<AuthOrganization>> login(String username, String password) async {
     final response = await _client.post(
       Uri.parse('${ApiConfig.baseUrl}/api/auth/login'),
       headers: {'Content-Type': 'application/json'},
@@ -30,7 +32,11 @@ class AuthService {
       accessToken: auth.accessToken,
       refreshToken: auth.refreshToken,
       expiresInMs: auth.expiresInMs,
+      userId: auth.userId,
     );
+    await _tokenStorage.saveUsername(username);
+    await _tokenStorage.saveOrganizations(auth.organizations);
+    return auth.organizations;
   }
 
   Future<void> register(String username, String password) async {
@@ -71,6 +77,7 @@ class AuthService {
       accessToken: auth.accessToken,
       refreshToken: auth.refreshToken,
       expiresInMs: auth.expiresInMs,
+      userId: auth.userId,
     );
   }
 
@@ -92,6 +99,29 @@ class AuthService {
   }
 
   Future<bool> isLoggedIn() => _tokenStorage.hasRefreshToken();
+
+  /// The signed-in user's id, if known.
+  ///
+  /// Sessions established before `userId` started being persisted locally
+  /// won't have it stored yet; in that case this forces one refresh (which
+  /// now also returns `userId`) to backfill it, instead of reporting the
+  /// user as signed out when they aren't.
+  Future<String?> currentUserId() async {
+    final userId = await _tokenStorage.getUserId();
+    if (userId != null) return userId;
+    if (!await _tokenStorage.hasRefreshToken()) return null;
+
+    try {
+      await refresh();
+    } catch (_) {
+      // Best-effort backfill; if it fails for any reason (offline, refresh
+      // token rejected, ...) just report the user id as unknown.
+      return null;
+    }
+    return _tokenStorage.getUserId();
+  }
+
+  Future<String?> currentUsername() => _tokenStorage.getUsername();
 
   dynamic _unwrap(http.Response response) {
     Map<String, dynamic>? body;

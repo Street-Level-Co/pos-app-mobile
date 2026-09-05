@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 
-import 'package:pos_mobile/model/product.dart';
+import 'package:pos_mobile/exception/api-exception.dart';
+import 'package:pos_mobile/model/item-catalog.dart';
+import 'package:pos_mobile/service/item-catalog-service.dart';
+import 'package:pos_mobile/service/token-storage.dart';
 
 class NewProductPage extends StatefulWidget {
-  final Product? product; // null for new product, existing product for edit
+  final ItemCatalog? catalogItem; // null to add a new item, set to edit an existing one
 
-  const NewProductPage({super.key, this.product});
+  const NewProductPage({super.key, this.catalogItem});
 
   @override
   State<NewProductPage> createState() => _NewProductPageState();
@@ -26,21 +29,19 @@ class _NewProductPageState extends State<NewProductPage> {
   bool _activeStatus = true;
   File? _imageFile;
   String? _imageUrl;
+  bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
-    if (widget.product != null) {
-      // Editing existing product
-      _nameController.text = widget.product!.name;
-      _descriptionController.text = widget.product!.description ?? '';
-      _priceController.text = widget.product!.price.toStringAsFixed(2);
-      _costController.text = widget.product!.cost?.toStringAsFixed(2) ?? '';
-      _selectedCategory = widget.product!.category;
-      _stockQuantity = widget.product!.stock;
-      _trackInventory = widget.product!.trackInventory ?? true;
-      _activeStatus = widget.product!.isActive ?? true;
-      _imageUrl = widget.product!.image;
+    if (widget.catalogItem != null) {
+      // Editing existing catalog item
+      final catalogItem = widget.catalogItem!;
+      _nameController.text = catalogItem.itemName;
+      _descriptionController.text = catalogItem.description ?? '';
+      _priceController.text = catalogItem.price.toStringAsFixed(2);
+      _costController.text = catalogItem.discountedPrice?.toStringAsFixed(2) ?? '';
+      _imageUrl = catalogItem.imgUrl;
     }
   }
 
@@ -64,37 +65,108 @@ class _NewProductPageState extends State<NewProductPage> {
     }
   }
 
-  void _saveProduct() {
-    if (_formKey.currentState!.validate()) {
-      if (_nameController.text.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Product name is required'),
-            backgroundColor: Color(0xFFEF4444),
-          ),
-        );
-        return;
-      }
+  Future<void> _saveProduct() async {
+    if (!_formKey.currentState!.validate()) return;
 
-      if (_priceController.text.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Price is required'),
-            backgroundColor: Color(0xFFEF4444),
-          ),
-        );
-        return;
-      }
-
-      // Save product logic here
+    if (_nameController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(widget.product != null ? 'Product updated!' : 'Product created!'),
-          backgroundColor: Color(0xFF10B981),
+          content: Text('Product name is required'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    final price = double.tryParse(_priceController.text);
+    if (price == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Enter a valid price'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    final discountedPrice = double.tryParse(_costController.text);
+
+    if (widget.catalogItem != null) {
+      setState(() => _isSaving = true);
+      try {
+        await ItemCatalogService().update(
+          widget.catalogItem!.id!,
+          UpdateItemCatalog(
+            price: price,
+            disPrice: discountedPrice,
+            description: _descriptionController.text.trim().isEmpty
+                ? null
+                : _descriptionController.text.trim(),
+            imgUrl: _imageUrl,
+          ),
+        );
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Item updated!'),
+            backgroundColor: Color(0xFF10B981),
+          ),
+        );
+        Navigator.pop(context, true);
+      } on ApiException catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message), backgroundColor: Color(0xFFEF4444)),
+        );
+      } finally {
+        if (mounted) setState(() => _isSaving = false);
+      }
+      return;
+    }
+
+    final orgId = await TokenStorage().getSelectedOrgId();
+    if (orgId == null || orgId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No organization selected'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      await ItemCatalogService().register(
+        CreateItemCatalog(
+          itemName: _nameController.text.trim(),
+          orgId: orgId,
+          price: price,
+          disPrice: discountedPrice,
+          description: _descriptionController.text.trim().isEmpty
+              ? null
+              : _descriptionController.text.trim(),
+          imgUrl: _imageUrl,
         ),
       );
 
-      Navigator.pop(context);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Product created!'),
+          backgroundColor: Color(0xFF10B981),
+        ),
+      );
+      Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Color(0xFFEF4444)),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -117,7 +189,7 @@ class _NewProductPageState extends State<NewProductPage> {
         ),
         leadingWidth: 80,
         title: Text(
-          widget.product != null ? 'Edit Item' : 'New Item',
+          widget.catalogItem != null ? 'Edit Item' : 'New Item',
           style: TextStyle(
             color: Colors.white,
             fontSize: 20,
@@ -216,6 +288,7 @@ class _NewProductPageState extends State<NewProductPage> {
                     SizedBox(height: 8),
                     TextField(
                       controller: _nameController,
+                      enabled: widget.catalogItem == null,
                       style: TextStyle(color: Colors.white),
                       decoration: InputDecoration(
                         hintText: 'e.g., Wireless Mouse',
@@ -355,7 +428,7 @@ class _NewProductPageState extends State<NewProductPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Cost (Optional)',
+                                'Discounted Price (Optional)',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 14,
@@ -564,24 +637,35 @@ class _NewProductPageState extends State<NewProductPage> {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: _saveProduct,
+                    onTap: _isSaving ? null : _saveProduct,
                     borderRadius: BorderRadius.circular(16),
                     child: Center(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.save, color: Colors.white, size: 22),
-                          SizedBox(width: 12),
-                          Text(
-                            widget.product != null ? 'Update Item' : 'Save Item',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                      child: _isSaving
+                          ? SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.save, color: Colors.white, size: 22),
+                                SizedBox(width: 12),
+                                Text(
+                                  widget.catalogItem != null
+                                      ? 'Update Item'
+                                      : 'Save Item',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
-                      ),
                     ),
                   ),
                 ),

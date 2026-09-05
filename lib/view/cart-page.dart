@@ -44,23 +44,23 @@ class _CartPageState extends State<CartPage> {
     });
   }
 
-  void _clearCart(){
-    setState(() {
-      cartItems.clear();
-    });
+  @override
+  void initState() {
+    super.initState();
+    for (var item in widget.productList) {
+      log('found item : ${item.product.name} : ${item.qty}');
+      cartItems.add(CartItem(
+        catalogItemId: item.product.id,
+        name: item.product.name,
+        price: item.product.price,
+        quantity: item.qty,
+        image: item.product.image,
+      ));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-
-    if(widget.productList != null){
-      for(var item in widget.productList){
-        log('found item : ${item.product.name} : ${item.qty}');
-        cartItems.add(CartItem(name: item.product.name, price: item.product.price, quantity: item.qty, image: item.product.image));
-      }
-    }
-
-
     return Scaffold(
       backgroundColor: Color(0xFF0D1117),
       appBar: AppBar(
@@ -291,51 +291,15 @@ class _CartPageState extends State<CartPage> {
                 onTap: cartItems.isEmpty
                     ? null
                     : () {
-                        // Handle charge
-                        showDialog(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            backgroundColor: Color(0xFF161B22),
-                            title: Text(
-                              'Process Payment',
-                              style: TextStyle(color: Colors.white),
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => CheckoutPage(
+                              totalAmount: total,
+                              items: cartItems,
                             ),
-                            content: Text(
-                              'Total amount: \$${total.toStringAsFixed(2)}',
-                              style: TextStyle(color: Colors.grey[400]),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: Text('Cancel'),
-                              ),
-                              ElevatedButton(
-                                onPressed: () {
-                                  Navigator.pop(context);
-                                  setState(() {
-                                    cartItems.clear();
-                                  });
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Payment successful!'),
-                                      backgroundColor: Color(0xFF10B981),
-                                    ),
-                                  );
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Color(0xFF3B82F6),
-                                ),
-                                child: Text('Confirm'),
-                              ),
-                            ],
                           ),
                         );
-                        Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => CheckoutPage(totalAmount: total),
-            ),
-          );
                       },
                 borderRadius: BorderRadius.circular(16),
                 child: Center(
@@ -551,12 +515,14 @@ class ActionButton extends StatelessWidget {
 
 // Cart Item Model
 class CartItem {
+  final String catalogItemId;
   final String name;
   final double price;
   int quantity;
   final String image;
 
   CartItem({
+    required this.catalogItemId,
     required this.name,
     required this.price,
     required this.quantity,
