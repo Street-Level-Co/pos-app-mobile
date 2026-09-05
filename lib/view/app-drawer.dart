@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:pos_mobile/service/app-counts.dart';
 import 'package:pos_mobile/service/auth-service.dart';
 import 'package:pos_mobile/view/business-profile-page.dart';
 import 'package:pos_mobile/view/orders-page.dart';
@@ -11,6 +12,13 @@ class AppDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: AppCounts(),
+      builder: (context, _) => _buildDrawer(context),
+    );
+  }
+
+  Widget _buildDrawer(BuildContext context) {
     return Drawer(
       backgroundColor: Color(0xFF0D1117),
       child: Column(
@@ -90,7 +98,7 @@ class AppDrawer extends StatelessWidget {
                   icon: Icons.shopping_bag_rounded,
                   iconColor: Color(0xFF10B981),
                   title: 'Products',
-                  badge: '245',
+                  badge: AppCounts().productCount?.toString(),
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.push(
@@ -103,7 +111,7 @@ class AppDrawer extends StatelessWidget {
                   icon: Icons.receipt_long_rounded,
                   iconColor: Color(0xFFF59E0B),
                   title: 'Orders',
-                  badge: '12',
+                  badge: AppCounts().orderCount?.toString(),
                   onTap: () {
                     Navigator.pop(context);
                     // Navigate to orders

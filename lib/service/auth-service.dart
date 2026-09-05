@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -83,19 +84,22 @@ class AuthService {
 
   Future<void> logout() async {
     final refreshToken = await _tokenStorage.getRefreshToken();
-    if (refreshToken != null) {
-      try {
-        await _client.post(
-          Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'refreshToken': refreshToken}),
-        );
-      } catch (_) {
-        // Best-effort server-side revocation; local session is cleared
-        // below regardless so the device always ends up logged out.
-      }
-    }
     await _tokenStorage.clear();
+
+    if (refreshToken != null) {
+      // Best-effort server-side revocation, fired without awaiting so a
+      // slow/unreachable backend can't block the UI from returning to the
+      // login screen — the local session is already cleared above.
+      unawaited(
+        _client
+            .post(
+              Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'refreshToken': refreshToken}),
+            )
+            .catchError((_) => http.Response('', 0)),
+      );
+    }
   }
 
   Future<bool> isLoggedIn() => _tokenStorage.hasRefreshToken();

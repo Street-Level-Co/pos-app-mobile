@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pos_mobile/exception/api-exception.dart';
 import 'package:pos_mobile/model/buying-product.dart';
 import 'package:pos_mobile/model/item-catalog.dart';
+import 'package:pos_mobile/service/app-counts.dart';
 import 'package:pos_mobile/service/item-catalog-service.dart';
 import 'package:pos_mobile/service/theme-changer.dart';
 import 'package:pos_mobile/service/token-storage.dart';
@@ -32,6 +33,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadCatalog();
+    AppCounts().refresh();
   }
 
   Future<void> _loadCatalog() async {

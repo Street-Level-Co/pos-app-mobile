@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'package:pos_mobile/exception/api-exception.dart';
+import 'package:pos_mobile/model/sale.dart';
+import 'package:pos_mobile/service/sales-service.dart';
+import 'package:pos_mobile/service/token-storage.dart';
+import 'package:pos_mobile/view/sale-detail-page.dart';
+
 class OrderHistoryPage extends StatefulWidget {
   const OrderHistoryPage({super.key});
 
@@ -8,102 +14,142 @@ class OrderHistoryPage extends StatefulWidget {
 }
 
 class _OrderHistoryPageState extends State<OrderHistoryPage> {
-  String selectedFilter = 'All';
-  final List<String> filters = ['All', 'Completed', 'Refunded', 'Pending'];
+  static const _pageSize = 10;
 
-  final List<OrderGroup> orderGroups = [
-    OrderGroup(
-      date: 'TODAY',
-      total: 1245.50,
-      orders: [
-        Order(
-          customerName: 'Alice Smith',
-          orderId: '#ORD-4921',
-          time: '14:30 PM',
-          amount: 124.50,
-          status: OrderStatus.paid,
-          hasAvatar: true,
-          avatarUrl: 'https://randomuser.me/api/portraits/women/1.jpg',
-        ),
-        Order(
-          customerName: 'Michael Johnson',
-          orderId: '#ORD-4920',
-          time: '13:15 PM',
-          amount: 45.00,
-          status: OrderStatus.pending,
-          hasAvatar: false,
-          initials: 'MJ',
-        ),
-        Order(
-          customerName: 'David Chen',
-          orderId: '#ORD-4919',
-          time: '11:45 AM',
-          amount: 89.99,
-          status: OrderStatus.refunded,
-          hasAvatar: true,
-          avatarUrl: 'https://randomuser.me/api/portraits/men/2.jpg',
-        ),
-      ],
-    ),
-    OrderGroup(
-      date: 'YESTERDAY',
-      total: 3890.00,
-      orders: [
-        Order(
-          customerName: 'Walk-in Customer',
-          orderId: '#ORD-4918',
-          time: '18:20 PM',
-          amount: 12.50,
-          status: OrderStatus.paid,
-          hasAvatar: false,
-          isWalkIn: true,
-        ),
-        Order(
-          customerName: 'Sarah Wilson',
-          orderId: '#ORD-4917',
-          time: '16:45 PM',
-          amount: 230.00,
-          status: OrderStatus.paid,
-          hasAvatar: true,
-          avatarUrl: 'https://randomuser.me/api/portraits/women/3.jpg',
-        ),
-      ],
-    ),
-  ];
+  final ScrollController _scrollController = ScrollController();
 
-  List<OrderGroup> get filteredOrderGroups {
-    if (selectedFilter == 'All') {
-      return orderGroups;
+  bool _loading = true;
+  bool _loadingMore = false;
+  String? _error;
+  List<Sale> _sales = [];
+  int _page = 0;
+  int _totalPages = 1;
+  int _totalElements = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_loadingMore || _loading) return;
+    if (_page + 1 >= _totalPages) return;
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      _loadMore();
     }
+  }
 
-    return orderGroups.map((group) {
-      final filteredOrders = group.orders.where((order) {
-        switch (selectedFilter) {
-          case 'Completed':
-            return order.status == OrderStatus.paid;
-          case 'Refunded':
-            return order.status == OrderStatus.refunded;
-          case 'Pending':
-            return order.status == OrderStatus.pending;
-          default:
-            return true;
-        }
-      }).toList();
-
-      return OrderGroup(
-        date: group.date,
-        total: filteredOrders.fold(0, (sum, order) => sum + order.amount),
-        orders: filteredOrders,
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final orgId = await TokenStorage().getSelectedOrgId();
+      if (orgId == null || orgId.isEmpty) {
+        setState(() {
+          _error = 'No organization selected';
+          _loading = false;
+        });
+        return;
+      }
+      final result = await SalesService().getAllForOrganization(
+        orgId,
+        page: 0,
+        size: _pageSize,
       );
-    }).where((group) => group.orders.isNotEmpty).toList();
+      setState(() {
+        _sales = result.content;
+        _page = result.number;
+        _totalPages = result.totalPages;
+        _totalElements = result.totalElements;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
   }
 
-  int get totalOrders {
-    return orderGroups.fold(0, (sum, group) => sum + group.orders.length);
+  Future<void> _loadMore() async {
+    setState(() => _loadingMore = true);
+    try {
+      final orgId = await TokenStorage().getSelectedOrgId();
+      if (orgId == null || orgId.isEmpty) return;
+      final result = await SalesService().getAllForOrganization(
+        orgId,
+        page: _page + 1,
+        size: _pageSize,
+      );
+      setState(() {
+        _sales = [..._sales, ...result.content];
+        _page = result.number;
+        _totalPages = result.totalPages;
+        _totalElements = result.totalElements;
+      });
+    } on ApiException catch (_) {
+      // Best-effort pagination fetch; leave the already-loaded sales as-is.
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
   }
 
-  int get displayedOrders {
-    return filteredOrderGroups.fold(0, (sum, group) => sum + group.orders.length);
+  List<MapEntry<String, List<Sale>>> get _groupedSales {
+    final groups = <MapEntry<String, List<Sale>>>[];
+    for (final sale in _sales) {
+      final label = _dateGroupLabel(sale.createdAt);
+      if (groups.isNotEmpty && groups.last.key == label) {
+        groups.last.value.add(sale);
+      } else {
+        groups.add(MapEntry(label, [sale]));
+      }
+    }
+    return groups;
+  }
+
+  static String _dateGroupLabel(DateTime dt) {
+    final local = dt.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final date = DateTime(local.year, local.month, local.day);
+    final diff = today.difference(date).inDays;
+    if (diff == 0) return 'TODAY';
+    if (diff == 1) return 'YESTERDAY';
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[local.month - 1]} ${local.day}, ${local.year}';
+  }
+
+  static String _formatTime(DateTime dt) {
+    final local = dt.toLocal();
+    final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final period = local.hour >= 12 ? 'PM' : 'AM';
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$hour12:$minute $period';
   }
 
   @override
@@ -126,157 +172,133 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
           ),
         ),
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.calendar_today, color: Colors.white),
-            onPressed: () {
-              // Open date picker
-            },
-          ),
-        ],
       ),
-      body: Column(
-        children: [
-          // Search Bar
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Color(0xFF1C2128),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: TextField(
-                style: TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'Search ID, name or amount...',
-                  hintStyle: TextStyle(color: Color(0xFF6B7280)),
-                  prefixIcon: Icon(Icons.search, color: Color(0xFF6B7280)),
-                  suffixIcon: Icon(Icons.tune, color: Color(0xFF6B7280)),
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                ),
-              ),
-            ),
-          ),
+      body: _buildBody(),
+    );
+  }
 
-          // Filter Tabs
-          Container(
-            height: 50,
-            margin: EdgeInsets.only(bottom: 16),
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              itemCount: filters.length,
-              itemBuilder: (context, index) {
-                final filter = filters[index];
-                final isSelected = selectedFilter == filter;
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      selectedFilter = filter;
-                    });
-                  },
-                  child: Container(
-                    margin: EdgeInsets.only(right: 12),
-                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isSelected ? Color(0xFF3B82F6) : Color(0xFF1C2128),
-                      borderRadius: BorderRadius.circular(25),
-                    ),
-                    child: Center(
-                      child: Text(
-                        filter,
+  Widget _buildBody() {
+    if (_loading) {
+      return Center(child: CircularProgressIndicator(color: Color(0xFF3B82F6)));
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 40),
+              SizedBox(height: 12),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white),
+              ),
+              SizedBox(height: 16),
+              ElevatedButton(onPressed: _load, child: Text('Retry')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_sales.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.receipt_long_outlined,
+                color: Colors.grey[600],
+                size: 48,
+              ),
+              SizedBox(height: 16),
+              Text(
+                'No sales yet.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final groups = _groupedSales;
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.builder(
+        controller: _scrollController,
+        padding: EdgeInsets.symmetric(horizontal: 16),
+        itemCount: groups.length + 1,
+        itemBuilder: (context, index) {
+          if (index == groups.length) {
+            return Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                child: _loadingMore
+                    ? CircularProgressIndicator(color: Color(0xFF3B82F6))
+                    : Text(
+                        'Showing ${_sales.length} of $_totalElements sales',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Color(0xFF6B7280),
                           fontSize: 14,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                         ),
                       ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-
-          // Orders List
-          Expanded(
-            child: ListView.builder(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              itemCount: filteredOrderGroups.length,
-              itemBuilder: (context, groupIndex) {
-                final group = filteredOrderGroups[groupIndex];
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Date Header
-                    Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            group.date,
-                            style: TextStyle(
-                              color: Color(0xFF6B7280),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                          Text(
-                            '\$${group.total.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              color: Color(0xFF6B7280),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Orders in this group
-                    ...group.orders.map((order) => OrderCard(order: order)).toList(),
-
-                    SizedBox(height: 8),
-                  ],
-                );
-              },
-            ),
-          ),
-
-          // Footer
-          Container(
-            padding: EdgeInsets.all(16),
-            child: Text(
-              'Showing $displayedOrders of $totalOrders orders',
-              style: TextStyle(
-                color: Color(0xFF6B7280),
-                fontSize: 14,
               ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ],
+            );
+          }
+
+          final group = groups[index];
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  group.key,
+                  style: TextStyle(
+                    color: Color(0xFF6B7280),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              ...group.value.map(
+                (sale) => SaleCard(sale: sale, formatTime: _formatTime),
+              ),
+              SizedBox(height: 8),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-// Order Card Widget
-class OrderCard extends StatelessWidget {
-  final Order order;
+// Sale Card Widget
+class SaleCard extends StatelessWidget {
+  final Sale sale;
+  final String Function(DateTime) formatTime;
 
-  const OrderCard({required this.order});
+  const SaleCard({required this.sale, required this.formatTime});
 
   @override
   Widget build(BuildContext context) {
+    final isWalkIn = sale.customerMobile == null;
+    final itemCount = sale.items.fold<int>(0, (sum, item) => sum + item.qty);
+
     return GestureDetector(
       onTap: () {
-        // Navigate to order details
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Order ${order.orderId} details')),
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => SaleDetailPage(sale: sale)),
         );
       },
       child: Container(
@@ -288,52 +310,26 @@ class OrderCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Avatar
             Container(
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: order.isWalkIn 
-                    ? Color(0xFF4C1D4C)
-                    : order.hasAvatar
-                        ? Colors.transparent
-                        : Color(0xFF3730A3),
+                color: isWalkIn ? Color(0xFF4C1D4C) : Color(0xFF3730A3),
                 shape: BoxShape.circle,
               ),
-              child: order.hasAvatar
-                  ? ClipOval(
-                      child: Image.network(
-                        order.avatarUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Center(
-                            child: Icon(Icons.person, color: Colors.white),
-                          );
-                        },
-                      ),
-                    )
-                  : Center(
-                      child: order.isWalkIn
-                          ? Icon(Icons.storefront, color: Color(0xFFEC4899), size: 28)
-                          : Text(
-                              order.initials ?? '',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                    ),
+              child: Center(
+                child: isWalkIn
+                    ? Icon(Icons.storefront, color: Color(0xFFEC4899), size: 28)
+                    : Icon(Icons.person, color: Colors.white),
+              ),
             ),
             SizedBox(width: 16),
-
-            // Order Info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    order.customerName,
+                    isWalkIn ? 'Walk-in Customer' : '+${sale.customerMobile}',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 18,
@@ -341,145 +337,24 @@ class OrderCard extends StatelessWidget {
                     ),
                   ),
                   SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Text(
-                        order.orderId,
-                        style: TextStyle(
-                          color: Color(0xFF6B7280),
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        ' • ',
-                        style: TextStyle(
-                          color: Color(0xFF6B7280),
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        order.time,
-                        style: TextStyle(
-                          color: Color(0xFF6B7280),
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
+                  Text(
+                    '$itemCount item${itemCount == 1 ? '' : 's'} • ${formatTime(sale.createdAt)}',
+                    style: TextStyle(color: Color(0xFF6B7280), fontSize: 14),
                   ),
                 ],
               ),
             ),
-
-            // Amount and Status
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  order.status == OrderStatus.refunded
-                      ? '\$${order.amount.toStringAsFixed(2)}'
-                      : '\$${order.amount.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    color: order.status == OrderStatus.refunded
-                        ? Color(0xFF6B7280)
-                        : Color(0xFF3B82F6),
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    decoration: order.status == OrderStatus.refunded
-                        ? TextDecoration.lineThrough
-                        : null,
-                  ),
-                ),
-                SizedBox(height: 4),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 0, vertical: 4),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: _getStatusColor(order.status),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      SizedBox(width: 6),
-                      Text(
-                        _getStatusText(order.status),
-                        style: TextStyle(
-                          color: _getStatusColor(order.status),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            Text(
+              '\$${sale.totalAmount.toStringAsFixed(2)}',
+              style: TextStyle(
+                color: Color(0xFF3B82F6),
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ],
         ),
       ),
     );
   }
-
-  Color _getStatusColor(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.paid:
-        return Color(0xFF10B981);
-      case OrderStatus.pending:
-        return Color(0xFFF59E0B);
-      case OrderStatus.refunded:
-        return Color(0xFFEF4444);
-    }
-  }
-
-  String _getStatusText(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.paid:
-        return 'Paid';
-      case OrderStatus.pending:
-        return 'Pending';
-      case OrderStatus.refunded:
-        return 'Refunded';
-    }
-  }
-}
-
-// Models
-enum OrderStatus { paid, pending, refunded }
-
-class Order {
-  final String customerName;
-  final String orderId;
-  final String time;
-  final double amount;
-  final OrderStatus status;
-  final bool hasAvatar;
-  final String? avatarUrl;
-  final String? initials;
-  final bool isWalkIn;
-
-  Order({
-    required this.customerName,
-    required this.orderId,
-    required this.time,
-    required this.amount,
-    required this.status,
-    this.hasAvatar = false,
-    this.avatarUrl,
-    this.initials,
-    this.isWalkIn = false,
-  });
-}
-
-class OrderGroup {
-  final String date;
-  final double total;
-  final List<Order> orders;
-
-  OrderGroup({
-    required this.date,
-    required this.total,
-    required this.orders,
-  });
 }

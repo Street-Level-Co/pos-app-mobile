@@ -1,6 +1,7 @@
 import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'package:pos_mobile/model/buying-product.dart';
+import 'package:pos_mobile/model/sale.dart';
 import 'package:pos_mobile/view/checkout-page.dart';
 import 'package:pos_mobile/view/home-page.dart';
 
@@ -16,17 +17,28 @@ class CartPage extends StatefulWidget {
 class _CartPageState extends State<CartPage> {
   final double taxRate = 0.08; // 8% tax
   late List<CartItem> cartItems = [];
+  final _customerMobileController = TextEditingController();
+  DiscountType? _discountType;
+  double? _discountValue;
 
   double get subtotal {
     return cartItems.fold(0, (sum, item) => sum + (item.price * item.quantity));
   }
 
+  double get discountAmount {
+    if (_discountType == null || _discountValue == null) return 0;
+    final amount = _discountType == DiscountType.percentage
+        ? subtotal * (_discountValue! / 100)
+        : _discountValue!;
+    return amount.clamp(0, subtotal);
+  }
+
   double get tax {
-    return subtotal * taxRate;
+    return (subtotal - discountAmount) * taxRate;
   }
 
   double get total {
-    return subtotal + tax;
+    return subtotal - discountAmount + tax;
   }
 
   void _updateQuantity(int index, int change) {
@@ -42,6 +54,147 @@ class _CartPageState extends State<CartPage> {
     setState(() {
       cartItems.removeAt(index);
     });
+  }
+
+  @override
+  void dispose() {
+    _customerMobileController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openDiscountDialog() async {
+    var selectedType = _discountType ?? DiscountType.percentage;
+    final valueController = TextEditingController(
+      text: _discountValue == null ? '' : _discountValue.toString(),
+    );
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: Color(0xFF161B22),
+          title: Text('Add Discount', style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: _DiscountTypeChip(
+                      label: 'Percentage (%)',
+                      isSelected: selectedType == DiscountType.percentage,
+                      onTap: () => setDialogState(() => selectedType = DiscountType.percentage),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: _DiscountTypeChip(
+                      label: 'Amount (\$)',
+                      isSelected: selectedType == DiscountType.amount,
+                      onTap: () => setDialogState(() => selectedType = DiscountType.amount),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 16),
+              TextField(
+                controller: valueController,
+                autofocus: true,
+                style: TextStyle(color: Colors.white),
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  hintText: selectedType == DiscountType.percentage ? 'e.g., 10' : 'e.g., 5.00',
+                  hintStyle: TextStyle(color: Colors.grey[600]),
+                  filled: true,
+                  fillColor: Color(0xFF0D1117),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            if (_discountType != null)
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _discountType = null;
+                    _discountValue = null;
+                  });
+                  Navigator.pop(context);
+                },
+                child: Text('Remove Discount', style: TextStyle(color: Color(0xFFEF4444))),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final value = double.tryParse(valueController.text.trim());
+                if (value == null || value <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Enter a valid discount value'),
+                      backgroundColor: Color(0xFFEF4444),
+                    ),
+                  );
+                  return;
+                }
+                if (selectedType == DiscountType.percentage && value > 100) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Percentage discount can\'t exceed 100%'),
+                      backgroundColor: Color(0xFFEF4444),
+                    ),
+                  );
+                  return;
+                }
+                setState(() {
+                  _discountType = selectedType;
+                  _discountValue = value;
+                });
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Color(0xFF3B82F6)),
+              child: Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _goToCheckout() {
+    final mobileText = _customerMobileController.text.trim();
+    int? customerMobile;
+    if (mobileText.isNotEmpty) {
+      customerMobile = int.tryParse(mobileText);
+      if (customerMobile == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Enter a valid mobile number'),
+            backgroundColor: Color(0xFFEF4444),
+          ),
+        );
+        return;
+      }
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CheckoutPage(
+          totalAmount: total,
+          items: cartItems,
+          customerMobile: customerMobile,
+          discountType: _discountType,
+          discountValue: _discountValue,
+        ),
+      ),
+    );
   }
 
   @override
@@ -103,6 +256,29 @@ class _CartPageState extends State<CartPage> {
       ),
       body: Column(
         children: [
+          // Customer Mobile Number (Optional)
+          Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Color(0xFF161B22),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: TextField(
+                controller: _customerMobileController,
+                style: TextStyle(color: Colors.white),
+                keyboardType: TextInputType.phone,
+                decoration: InputDecoration(
+                  hintText: 'Customer mobile number (optional)',
+                  hintStyle: TextStyle(color: Colors.grey[600]),
+                  prefixIcon: Icon(Icons.phone, color: Colors.grey[500]),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+              ),
+            ),
+          ),
+
           // Cart Items List
           Expanded(
             child: cartItems.isEmpty
@@ -155,9 +331,7 @@ class _CartPageState extends State<CartPage> {
                   icon: Icons.local_offer_outlined,
                   label: 'Discount',
                   color: Color(0xFF3B82F6),
-                  onTap: () {
-                    // Handle discount
-                  },
+                  onTap: _openDiscountDialog,
                 ),
                 ActionButton(
                   icon: Icons.edit_note,
@@ -173,14 +347,6 @@ class _CartPageState extends State<CartPage> {
                   color: Color(0xFF6B7280),
                   onTap: () {
                     // Handle scan
-                  },
-                ),
-                ActionButton(
-                  icon: Icons.person_search,
-                  label: 'Customer',
-                  color: Color(0xFF6B7280),
-                  onTap: () {
-                    // Handle customer
                   },
                 ),
               ],
@@ -217,6 +383,31 @@ class _CartPageState extends State<CartPage> {
                     ),
                   ],
                 ),
+                if (_discountType != null && _discountValue != null) ...[
+                  SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _discountType == DiscountType.percentage
+                            ? 'Discount (${_discountValue!.toStringAsFixed(0)}%)'
+                            : 'Discount',
+                        style: TextStyle(
+                          color: Colors.grey[400],
+                          fontSize: 16,
+                        ),
+                      ),
+                      Text(
+                        '-\$${discountAmount.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          color: Color(0xFFEF4444),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -288,19 +479,7 @@ class _CartPageState extends State<CartPage> {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: cartItems.isEmpty
-                    ? null
-                    : () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => CheckoutPage(
-                              totalAmount: total,
-                              items: cartItems,
-                            ),
-                          ),
-                        );
-                      },
+                onTap: cartItems.isEmpty ? null : _goToCheckout,
                 borderRadius: BorderRadius.circular(16),
                 child: Center(
                   child: Row(
@@ -508,6 +687,43 @@ class ActionButton extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// Discount Type Chip (used in the Add Discount dialog)
+class _DiscountTypeChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _DiscountTypeChip({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? Color(0xFF3B82F6) : Color(0xFF0D1117),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+        ),
       ),
     );
   }

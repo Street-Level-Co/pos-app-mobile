@@ -9,8 +9,18 @@ import 'package:pos_mobile/view/home-page.dart';
 class CheckoutPage extends StatefulWidget {
   final double totalAmount;
   final List<CartItem> items;
+  final int? customerMobile;
+  final DiscountType? discountType;
+  final double? discountValue;
 
-  const CheckoutPage({super.key, required this.totalAmount, required this.items});
+  const CheckoutPage({
+    super.key,
+    required this.totalAmount,
+    required this.items,
+    this.customerMobile,
+    this.discountType,
+    this.discountValue,
+  });
 
   @override
   State<CheckoutPage> createState() => _CheckoutPageState();
@@ -19,14 +29,7 @@ class CheckoutPage extends StatefulWidget {
 class _CheckoutPageState extends State<CheckoutPage> {
   String selectedPaymentMethod = 'Cash';
   String cashTendered = '';
-  final _customerMobileController = TextEditingController();
   bool _isProcessing = false;
-
-  @override
-  void dispose() {
-    _customerMobileController.dispose();
-    super.dispose();
-  }
 
   double get cashAmount {
     return double.tryParse(cashTendered) ?? 0.0;
@@ -79,21 +82,6 @@ class _CheckoutPageState extends State<CheckoutPage> {
       return;
     }
 
-    final mobileText = _customerMobileController.text.trim();
-    int? customerMobile;
-    if (mobileText.isNotEmpty) {
-      customerMobile = int.tryParse(mobileText);
-      if (customerMobile == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Enter a valid mobile number'),
-            backgroundColor: Color(0xFFEF4444),
-          ),
-        );
-        return;
-      }
-    }
-
     final orgId = await TokenStorage().getSelectedOrgId();
     if (orgId == null || orgId.isEmpty) {
       if (!mounted) return;
@@ -111,7 +99,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
       await SalesService().register(
         CreateSale(
           orgId: orgId,
-          customerMobile: customerMobile,
+          customerMobile: widget.customerMobile,
+          discountType: widget.discountType,
+          discountValue: widget.discountValue,
           items: widget.items
               .map((item) => CreateSaleItem(
                     catalogItemId: item.catalogItemId,
@@ -236,31 +226,6 @@ class _CheckoutPageState extends State<CheckoutPage> {
               color: Colors.white,
               fontSize: 56,
               fontWeight: FontWeight.bold,
-            ),
-          ),
-
-          SizedBox(height: 24),
-
-          // Customer Mobile Number (Optional)
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Color(0xFF161B22),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: TextField(
-                controller: _customerMobileController,
-                style: TextStyle(color: Colors.white),
-                keyboardType: TextInputType.phone,
-                decoration: InputDecoration(
-                  hintText: 'Customer mobile number (optional)',
-                  hintStyle: TextStyle(color: Colors.grey[600]),
-                  prefixIcon: Icon(Icons.phone, color: Colors.grey[500]),
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                ),
-              ),
             ),
           ),
 

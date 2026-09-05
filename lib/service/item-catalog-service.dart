@@ -31,4 +31,9 @@ class ItemCatalogService {
     final data = await _client.put('/api/catalog/$catalogItemId', body: input.toJson());
     return ItemCatalog.fromJson(data as Map<String, dynamic>);
   }
+
+  Future<int> getCount(String orgId) async {
+    final data = await _client.get('/api/catalog/count/$orgId');
+    return (data as num).toInt();
+  }
 }
